@@ -370,18 +370,25 @@ export class Channel {
     this.joinedOnce  = false
     this.joinPush    = new Push(this, CHANNEL_EVENTS.join, this.params, this.timeout)
     this.pushBuffer  = []
-    this.rejoinTimer  = new Timer(
-      () => this.rejoinUntilConnected(),
-      this.socket.reconnectAfterMs
-    )
+    this.rejoinDisabled = socket.reconnectDisabled || false
+    if (!this.rejoinDisabled) {
+      this.rejoinTimer  = new Timer(
+        () => this.rejoinUntilConnected(),
+        this.socket.reconnectAfterMs
+      )
+    }
     this.joinPush.receive("ok", () => {
       this.state = CHANNEL_STATES.joined
-      this.rejoinTimer.reset()
+      if (!this.rejoinDisabled) {
+        this.rejoinTimer.reset()
+      }
       this.pushBuffer.forEach( pushEvent => pushEvent.send() )
       this.pushBuffer = []
     })
     this.onClose( () => {
-      this.rejoinTimer.reset()
+      if (!this.rejoinDisabled) {
+        this.rejoinTimer.reset()
+      }
       if (this.socket.hasLogger()) this.socket.log("channel", `close ${this.topic} ${this.joinRef()}`)
       this.state = CHANNEL_STATES.closed
       this.socket.remove(this)
@@ -389,7 +396,9 @@ export class Channel {
     this.onError( reason => { if(this.isLeaving() || this.isClosed()){ return }
       if (this.socket.hasLogger()) this.socket.log("channel", `error ${this.topic}`, reason)
       this.state = CHANNEL_STATES.errored
-      this.rejoinTimer.scheduleTimeout()
+      if (!this.rejoinDisabled) {
+        this.rejoinTimer.scheduleTimeout()
+      }
     })
     this.joinPush.receive("timeout", () => { if(!this.isJoining()){ return }
       if (this.socket.hasLogger()) this.socket.log("channel", `timeout ${this.topic} (${this.joinRef()})`, this.joinPush.timeout)
@@ -397,7 +406,9 @@ export class Channel {
       leavePush.send()
       this.state = CHANNEL_STATES.errored
       this.joinPush.reset()
-      this.rejoinTimer.scheduleTimeout()
+      if (!this.rejoinDisabled) {
+        this.rejoinTimer.scheduleTimeout()
+      }
     })
     this.on(CHANNEL_EVENTS.reply, (payload, ref) => {
       this.trigger(this.replyEventName(ref), payload)
@@ -408,9 +419,11 @@ export class Channel {
    * @private
    */
   rejoinUntilConnected(){
-    this.rejoinTimer.scheduleTimeout()
-    if(this.socket.isConnected()){
-      this.rejoin()
+    if (!this.rejoinDisabled) {
+      this.rejoinTimer.scheduleTimeout()
+      if(this.socket.isConnected()){
+        this.rejoin()
+      }
     }
   }
 
@@ -723,6 +736,7 @@ export class Socket {
       this.decode = this.defaultDecoder
     }
     this.heartbeatIntervalMs  = opts.heartbeatIntervalMs || 30000
+    this.reconnectDisabled    = opts.reconnectDisabled || false;
     this.reconnectAfterMs     = opts.reconnectAfterMs || function(tries){
       return [1000, 2000, 5000, 10000][tries - 1] || 10000
     }
@@ -732,9 +746,11 @@ export class Socket {
     this.endPoint             = `${endPoint}/${TRANSPORTS.websocket}`
     this.heartbeatTimer       = null
     this.pendingHeartbeatRef  = null
-    this.reconnectTimer       = new Timer(() => {
-      this.teardown(() => this.connect())
-    }, this.reconnectAfterMs)
+    if (!this.reconnectDisabled) {
+      this.reconnectTimer       = new Timer(() => {
+        this.teardown(() => this.connect())
+      }, this.reconnectAfterMs)
+    }
   }
 
   /**
@@ -764,7 +780,9 @@ export class Socket {
    * @param {string} reason
    */
   disconnect(callback, code, reason){
-    this.reconnectTimer.reset()
+    if (!this.reconnectDisabled) {
+      this.reconnectTimer.reset()
+    }
     this.teardown(callback, code, reason)
   }
 
@@ -836,7 +854,9 @@ export class Socket {
   onConnOpen(){
     if (this.hasLogger()) this.log("transport", `connected to ${this.endPointURL()}`)
     this.flushSendBuffer()
-    this.reconnectTimer.reset()
+    if (!this.reconnectDisabled) {
+      this.reconnectTimer.reset()
+    }
     this.resetHeartbeat()
     this.stateChangeCallbacks.open.forEach( callback => callback() )
   }
@@ -865,7 +885,9 @@ export class Socket {
     this.triggerChanError()
     clearInterval(this.heartbeatTimer)
     if(event && event.code !== WS_CLOSE_NORMAL) {
-      this.reconnectTimer.scheduleTimeout()
+      if (!this.reconnectDisabled) {
+        this.reconnectTimer.scheduleTimeout()
+      }
     }
     this.stateChangeCallbacks.close.forEach( callback => callback(event) )
   }
