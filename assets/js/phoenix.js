@@ -371,6 +371,7 @@ export class Channel {
     this.joinPush    = new Push(this, CHANNEL_EVENTS.join, this.params, this.timeout)
     this.pushBuffer  = []
     this.rejoinDisabled = socket.reconnectDisabled || false
+    console.warn('>> channel constructed', this.rejoinDisabled);
     if (!this.rejoinDisabled) {
       this.rejoinTimer  = new Timer(
         () => this.rejoinUntilConnected(),
@@ -746,6 +747,7 @@ export class Socket {
     this.endPoint             = `${endPoint}/${TRANSPORTS.websocket}`
     this.heartbeatTimer       = null
     this.pendingHeartbeatRef  = null
+    console.warn('Socket constructed', this.reconnectDisabled);
     if (!this.reconnectDisabled) {
       this.reconnectTimer       = new Timer(() => {
         this.teardown(() => this.connect())
